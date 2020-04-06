@@ -6,6 +6,7 @@
 
 Ticker smart_elec_ticker;
 extern SmartElecNvram smart_nvram;
+extern volatile boolean port_status_changed[]; // For MQTT
 
 // There are multiple switches to control. There are input and output pins
 int SmartElecOutputPins[] = { D0, D2, D1 };
@@ -41,6 +42,7 @@ void SetSwitchState (int port, int val)
       // set the output pin
       digitalWrite(output_pin, LOW);
       SmartElecSwitchState[port] = LOW;
+      port_status_changed[port] = true;
     }
     else if (val == HIGH)
     {
@@ -54,6 +56,7 @@ void SetSwitchState (int port, int val)
       // set the output pin
       digitalWrite(output_pin, HIGH);
       SmartElecSwitchState[port] = HIGH;
+      port_status_changed[port] = true;
     }
   }
   else
@@ -62,11 +65,13 @@ void SetSwitchState (int port, int val)
     {
       digitalWrite(output_pin, LOW); // high is high; low is low
       SmartElecSwitchState[port] = LOW;
+      port_status_changed[port] = true;
     }
     else if (val == HIGH)
     {
       digitalWrite(output_pin, HIGH); // high is high; low is low
       SmartElecSwitchState[port] = HIGH;
+      port_status_changed[port] = true;
     }
   }
 }
@@ -124,7 +129,7 @@ void smart_elec_setup()
   int i;
 
   // Configure the appropriate input and output pins
-  //pinMode(A0, INPUT);        // Input from ACS712
+  pinMode(A0, INPUT);        // Input from ACS712
   pinMode(D0, OUTPUT);       // controls the regulator output
   pinMode(D1, OUTPUT);       // controls the relay port 1
   pinMode(D2, OUTPUT);       // controls the relay port 2

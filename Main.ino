@@ -2,7 +2,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiClient.h>
-#include <PubSubClient.h>
 
 #ifndef APSSID
 #define APSSID "SMART-ELEC"
@@ -21,8 +20,6 @@ IPAddress subnet(255, 255, 255, 0);
 WiFiClient client;
 WiFiServer server(80);
 SmartElecNvram smart_nvram;
-const char* mqtt_server = "test.mosquitto.org";
-PubSubClient mqtt_client(client);
 
 Ticker led_flicker_ticker;
 #define WifiAPInterruptVal    100   // ticker value in milli-seconds
@@ -136,7 +133,8 @@ void setup()
 
     // setup metrics module
     setup_metrics();
-    //mqtt_setup();
+    // setup mqtt module
+    setup_mqtt();
   }
 
   digitalWrite(LED_BUILTIN, 0);
@@ -160,22 +158,23 @@ void setup()
 
 }
 
-void loop() {
+void loop() 
+{
   int http_request, smart_elec_cmd, index, unit_index = 0;
 
+  // Update MDNS for local service discovery
   MDNS.update();
 
-  // perform client function
-  if (send_metrics_flag)
-  {
-    //report_metrics();
-    send_metrics_flag = false;
-  }
+  // Process the AMP Usage and Metrics related logic
+  process_metrics();
 
-  //mqtt_loop();
+  // Process the MQTT related commands
+  process_mqtt();
 
+  //
+  // Play the server role and process the client's request
+  //
   client = server.available();
-
   if (!client) {
     return;
   }

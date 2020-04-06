@@ -17,18 +17,13 @@ ACS712 sensor(ACS712_30A, A0);
 Influxdb influx(INFLUXDB_HOST);
 
 Ticker metrics_ticker;
-#define CalcMetricsInterruptVal    1         // ticker value in milli-seconds
 #define SendMetricsInterruptVal    15000     // ticker value in milli-seconds
-int send_metrics_cntr = 0;                   // Counter to expire for sending metrics
 volatile boolean send_metrics_flag = false;  // Boolean to tell 'loop' to send metrics
 
 void metrics_callback()
 {
-  //calculate_metrics();
-  send_metrics_cntr++;
-  if (send_metrics_cntr >= SendMetricsInterruptVal)
+  if (send_metrics_flag == false)
   {
-    send_metrics_cntr = 0;
     send_metrics_flag = true;
   }
 }
@@ -37,7 +32,7 @@ void metrics_callback()
 void start_metrics_timer()
 {
   // Initialize and Enable the LED flasher
-  metrics_ticker.attach_ms(CalcMetricsInterruptVal, metrics_callback);
+  metrics_ticker.attach_ms(SendMetricsInterruptVal, metrics_callback);
 }
 
 void stop_metrics_timer()
@@ -56,13 +51,14 @@ void setup_metrics()
   //influx.setPort(9999);
   influx.setToken("xzBozCsfbcekPcJ9Tbwq4EFXNscKuTL-QwoyLu_lKWbnZu04UXxo_0Fr_SxEiVjUk8e0A2CnJOo1RVX0XgZG-g==");
   influx.begin();
-//  Serial.println("Calibrating... Ensure that no current flows through the sensor at this moment");
-//  sensor.calibrate();
-//  Serial.println("Done!");
+  //  Serial.println("Calibrating... Ensure that no current flows through the sensor at this moment");
+  //  sensor.calibrate();
+  //  Serial.println("Done!");
 #endif
   start_metrics_timer();
 }
 
+long lastSample = 0;
 long sampleSum = 0;
 long sampleCount = 0;
 long calibration = 0;
@@ -70,7 +66,6 @@ float vpc = 4.8828125;
 float rms = 0;
 float millivolts = 0;
 float amp = 0;
-//float vpc = 3.22265625;
 
 void calibrate_acs712()
 {
@@ -89,12 +84,17 @@ void calibrate_acs712()
   sampleCount = 0;
 }
 
-void calculate_metrics()
+void process_metrics()
 {
-#if 1
-  //Serial.println("The analog Read is " + String(analogRead(A0)));
-  sampleSum += sq(analogRead(A0) - calibration);
-  sampleCount++;
+  if (millis() > lastSample + 1)
+  {
+    // Serial.println("The analog Read is " + String(analogRead(A0)));
+    sampleSum += sq(analogRead(A0) - calibration);
+    sampleCount++;
+    lastSample = millis();
+  }
+
+  // Averaging the RMS calculation
   if (sampleCount == 1000)
   {
     rms = sqrt(sampleSum / sampleCount);
@@ -103,16 +103,13 @@ void calculate_metrics()
     sampleSum = 0;
     sampleCount = 0;
   }
-#endif
 
-#if 0
-  InfluxData row("Current");
-  row.addTag("device", "TestDevice1");
-  row.addTag("mode", "Amp");
-  row.addValue("value", random(0, 30));
-  //influx.begin();
-  influx.write(row);
-#endif
+  // send the metrics to Influx Server
+  if (send_metrics_flag)
+  {
+    report_metrics();
+    send_metrics_flag = false;
+  }
 }
 
 void report_metrics()
@@ -136,6 +133,9 @@ void report_metrics()
     InfluxData row("amp");
     sprintf(dev_id, "DEV-%06x", smart_nvram.device_id);
     row.addTag("id", dev_id);
+    row.addValue("calib", calibration);
+    row.addValue("rms", rms);
+    row.addValue("mv", millivolts);
     row.addValue("val", amp);
 
     int httpsCode = https.POST(row.toString());

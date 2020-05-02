@@ -36,19 +36,25 @@ char* subStr (char* str, char *delim, int index)
   return sub;
 
 }
+
 void mqtt_callback(char* topic, byte* payload, unsigned int length)
 {
   char dev_id_topic[16];
+  char sub_msg[MQTT_MAX_PACKET_SIZE];
+  char *unit_str;
+  int unit_index;
 
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
   for (int i = 0; i < length; i++)
   {
-    Serial.print((char)payload[i]);
+    sub_msg[i] = (char)payload[i];
   }
+  sub_msg[length] = NULL;
+  Serial.print((char *)sub_msg);
   Serial.println();
-
+  
   // validate if this message is addressed to this device
   sprintf(dev_id_topic, "SE-%06x", smart_nvram.device_id);
 
@@ -74,7 +80,105 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)
     return;
   }
 
+  // Topic: “SE-xxxxxx/reset”:
+  if (strcmp ("reset", subStr(topic, "/", 2)) == 0)
+  {
+    Serial.println("Received RESET from MQTT. Resetting device");
+    delay(1000);
+    ESP.restart();
+    return;
+  }
 
+  // Topic: “SE-xxxxxx/wifi”:
+  if (strcmp ("wifi", subStr(topic, "/", 2)) == 0)
+  {
+    DynamicJsonDocument doc(MQTT_MAX_PACKET_SIZE);
+    Serial.println("Received WIFI config from MQTT. Saving WIFI params");
+    DeserializationError error = deserializeJson(doc, sub_msg);
+    smart_nvram.wifi_type = doc["wifi_type"];
+    strcpy(smart_nvram.wifi_ssid, doc["SSID"]);
+    strcpy(smart_nvram.wifi_password, doc["password"]);
+    print_smart_elec_nvram();
+    smart_elec_write_nvram(&smart_nvram);
+    return;
+  }
+
+  // Topic: “SE-xxxxxx/dev_name”:
+  if (strcmp ("dev_name", subStr(topic, "/", 2)) == 0)
+  {
+    Serial.println("Received dev_name change from MQTT. Saving settings");
+    strcpy(smart_nvram.device_name, (char *)sub_msg);
+    smart_elec_write_nvram(&smart_nvram);
+    return;
+  }
+
+  // Topic: “SE-xxxxxx/unit_name/<unit>”:
+  if (strcmp ("unit_name", subStr(topic, "/", 2)) == 0)
+  {
+    Serial.println("Received unit_name change from MQTT. Saving settings");
+    // find out the unit ID from the topic
+    unit_str = subStr(topic, "/", 3);
+    unit_index = atoi(unit_str);
+    if ((unit_index <= 0) || (unit_index > SmartElecNumSwitches))
+    {
+      Serial.println("ERROR: Invalid unit number in topic. Ignore msg and return");
+      return;
+    }
+    unit_index--; // make it zero based
+    strcpy(smart_nvram.unit[unit_index].unit_name, (char *)sub_msg);
+    smart_elec_write_nvram(&smart_nvram);
+    return;
+  }
+
+  // Topic: “SE-xxxxxx/unit_state/<unit>”:
+  if (strcmp ("unit_state", subStr(topic, "/", 2)) == 0)
+  {
+    Serial.println("Received unit_state change from MQTT. Turn the particular switch ON or OFF");
+    // find out the unit ID from the topic
+    unit_str = subStr(topic, "/", 3);
+    unit_index = atoi(unit_str);
+    if ((unit_index <= 0) || (unit_index > SmartElecNumSwitches))
+    {
+      Serial.println("ERROR: Invalid unit number in topic. Ignore msg and return");
+      return;
+    }
+    unit_index--; // make it zero based
+    if (strcmp((char *)sub_msg, "ON") == 0)
+    {
+      SetSwitchState(unit_index, HIGH);
+      smart_nvram.unit[unit_index].unit_state = HIGH;
+    }
+    else
+    {
+      SetSwitchState(unit_index, LOW);
+      smart_nvram.unit[unit_index].unit_state = LOW;
+    }
+    smart_elec_write_nvram(&smart_nvram);
+    return;
+  }
+
+  // Topic: “SE-xxxxxx/unit_level/<unit>”:
+  if (strcmp ("unit_level", subStr(topic, "/", 2)) == 0)
+  {
+    Serial.println("Received unit_level change from MQTT. Saving settings");
+    // find out the unit ID from the topic
+    unit_str = subStr(topic, "/", 3);
+    unit_index = atoi(unit_str);
+    if ((unit_index <= 0) || (unit_index > SmartElecNumSwitches))
+    {
+      Serial.println("ERROR: Invalid unit number in topic. Ignore msg and return");
+      return;
+    }
+    unit_index--; // make it zero based
+    smart_nvram.unit[unit_index].unit_level = atoi((char *)sub_msg);
+    // start regulation logic here
+    SmartElecRegulatorLevel = smart_nvram.unit[unit_index].unit_level;
+    // just set the switch state according to its current value
+    // level trigger will get started or stopped within that logic
+    SetSwitchState (SMARTELEC_UNIT_LEVEL_SWITCH_NUM, GetSwitchState(SMARTELEC_UNIT_LEVEL_SWITCH_NUM));
+    smart_elec_write_nvram(&smart_nvram);
+    return;
+  }
 }
 
 void mqtt_subscribe()
@@ -119,7 +223,7 @@ void mqtt_subscribe()
 
     if (smart_nvram.unit[i].unit_type == SMARTELEC_UNIT_TYPE_SWITCH_AND_LEVEL)
     {
-      sprintf(subscribe_topic, "SE-%06x/unit_type/%d", smart_nvram.device_id, i + 1);
+      sprintf(subscribe_topic, "SE-%06x/unit_level/%d", smart_nvram.device_id, i + 1);
       Serial.println(subscribe_topic);
       mqtt_client.subscribe(subscribe_topic);
     }
@@ -133,7 +237,7 @@ void mqtt_reconnect()
   {
     Serial.print("Attempting MQTT connection...");
     // Create a random client ID
-    String clientId = "ESP8266Client-";
+    String clientId = "-";
     clientId += String(random(0xffff), HEX);
     // Attempt to connect
     if (mqtt_client.connect(clientId.c_str()))

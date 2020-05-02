@@ -99,7 +99,8 @@ void process_metrics()
   {
     rms = sqrt(sampleSum / sampleCount);
     millivolts = (rms * vpc);
-    amp = (millivolts / 66);
+    // amp = (millivolts / 66);
+    amp = ((rms * 30) / calibration);
     sampleSum = 0;
     sampleCount = 0;
   }

@@ -137,7 +137,7 @@ void setup()
     setup_mqtt();
   }
 
-  digitalWrite(LED_BUILTIN, 0);
+  digitalWrite(LED_BUILTIN, 1);
 
   // Set up mDNS responder:
   // - first argument is the domain name, in this example
